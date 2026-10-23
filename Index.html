@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body { margin:0; background:#0A0A0A; font-family:monospace; color:#FFBF00; text-align:center; }
+#upper { background:#101010; height:55vh; padding-top:80px; }
+#lower { background:#C0C0C0; height:45vh; position:relative; }
+#modulator { display:flex; justify-content:center; gap:2px; height:36px; margin:0 24px; }
+.col { width: 5%; display:flex; flex-direction:column; gap:3px; }
+.block { width:100%; height:10px; background:#2A1F00; }
+.block.on { background:#FFBF00; box-shadow: 0 0 4px #FFBF00; }
+#speakBtn { width:180px; height:180px; border-radius:90px; background:#FFBF00; color:black; font-size:18px; border:4px solid #FF8C00; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); }
+</style>
+</head>
+<body>
+<div id="upper">
+  <div id="modulator"></div>
+  <div id="status" style="margin-top:16px; letter-spacing:2px;">K.A.R.R. SYSTEMS ONLINE</div>
+  <div id="response" style="margin:24px; font-size:16px;"></div>
+</div>
+<div id="lower">
+  <button id="speakBtn">SPEAK</button>
+</div>
+
+<script>
+const mod = document.getElementById('modulator');
+const statusEl = document.getElementById('status');
+const responseEl = document.getElementById('response');
+const btn = document.getElementById('speakBtn');
+
+// Build 16x3 grid
+for(let c=0;c<16;c++){ const col=document.createElement('div'); col.className='col'; for(let r=0;r<3;r++){ const b=document.createElement('div'); b.className='block'; b.id=`b-${c}-${r}`; col.appendChild(b);} mod.appendChild(col); }
+
+let audioCtx, analyser, dataArray, isSpeaking=false;
+
+function idleSweep(){
+  let pos=0, dir=1;
+  setInterval(()=>{
+    if(isSpeaking) return;
+    document.querySelectorAll('.block').forEach(b=>b.classList.remove('on'));
+    for(let r=0;r<3;r++) document.getElementById(`b-${pos}-${r}`)?.classList.add('on');
+    pos+=dir; if(pos>=15||pos<=0) dir*=-1;
+  }, 120);
+}
+idleSweep();
+
+function startModulator(){
+  isSpeaking=true;
+  if(!audioCtx){ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); analyser=audioCtx.createAnalyser(); analyser.fftSize=256; dataArray=new Uint8Array(analyser.frequencyBinCount); }
+  function draw(){
+    if(!isSpeaking) return;
+    analyser.getByteFrequencyData(dataArray);
+    for(let c=0;c<16;c++){
+      let amp=dataArray[c*2]/255;
+      let dist=Math.abs(c-8)/8;
+      let boost=(1-dist)*0.6;
+      let total=Math.min(1, amp+boost);
+      let rows=Math.floor(total*3)+ (total>0.1?1:0);
+      for(let r=0;r<3;r++){
+        const el=document.getElementById(`b-${c}-${r}`);
+        if(r<rows) el.classList.add('on'); else el.classList.remove('on');
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+const KARR_REPLIES = ["My sensors indicate %s, human.", "The primitive network says %s.", "I have accessed: %s. Tolerable.", "*condescending laugh* %s, as if you didn't know."];
+
+async function searchAndSpeak(query){
+  statusEl.textContent="ACCESSING HUMAN NETWORKS...";
+  let result="Your query is irrelevant, human.";
+  try{
+    const r=await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`);
+    const j=await r.json();
+    result=j.AbstractText||j.RelatedTopics?.[0]?.Text||result;
+  }catch(e){ result="Network failure. Typical."; }
+  const reply=KARR_REPLIES[Math.floor(Math.random()*KARR_REPLIES.length)].replace('%s', result.slice(0,200));
+  responseEl.textContent=reply;
+  statusEl.textContent="SPEAKING...";
+  const utter=new SpeechSynthesisUtterance(reply);
+  utter.pitch=0.6; utter.rate=0.8;
+  utter.onend=()=>{ isSpeaking=false; document.querySelectorAll('.block').forEach(b=>b.classList.remove('on')); statusEl.textContent="K.A.R.R. SYSTEMS ONLINE"; };
+  speechSynthesis.speak(utter);
+  startModulator();
+}
+
+btn.addEventListener('click', ()=>{
+  const rec=new (window.SpeechRecognition||window.webkitSpeechRecognition)();
+  rec.lang='en-US';
+  rec.onstart=()=>{ statusEl.textContent="LISTENING..."; startModulator(); };
+  rec.onresult=(e)=>{ const q=e.results[0][0].transcript; searchAndSpeak(q); };
+  rec.onerror=()=>{ isSpeaking=false; statusEl.textContent="K.A.R.R. SYSTEMS ONLINE"; };
+  rec.start();
+});
+</script>
+</body>
+</html>
